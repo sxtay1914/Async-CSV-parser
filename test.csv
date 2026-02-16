@@ -1,0 +1,3 @@
+full_name,email,date_of_birth,timezone
+Alice Smith,alice@example.com,1990-01-01,UTC
+Bob Wrong,bob@example,2025-01-01,Invalid/Zone
