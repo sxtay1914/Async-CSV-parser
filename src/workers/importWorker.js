@@ -1,13 +1,21 @@
 import bullmq from "bullmq";
-import { redisConnection } from "../config/redis.js";
+import dotenv from "dotenv";
 import fs from "fs";
+import path from "path";
 import csvParser from "csv-parser";
+import { redisConnection } from "../config/redis.js";
+import { connectDB } from "../config/database.js";
 import { ImportJob } from "../models/importJobModel.js";
 import { Customer } from "../models/customerModel.js";
 import { validateCustomerRow } from "../utils/validation.js";
 
 
+dotenv.config();
+await connectDB();
+
 const { Worker } = bullmq;
+const DEFAULT_BATCH_SIZE = 1000;
+const BATCH_SIZE = Number.parseInt(process.env.IMPORT_BATCH_SIZE || "", 10) || DEFAULT_BATCH_SIZE;
 
 // set up worker to process jobs from the importQueue
 const worker = new Worker(
@@ -27,15 +35,82 @@ const worker = new Worker(
 
         // keep track of row number
         let rowNumber = 1;
+        let batch = [];
 
-        return new Promise((resolve, reject) => {
-            // create stream object to read csv file
-            const stream = fs.createReadStream(job.data.filePath).pipe(csvParser())
-            
+        const normalizedPath = path.posix.normalize(
+            filePath.replace(/\\/g, "/")
+        );
 
-            stream.on("data", async (row) => {
+        try {
+            // Use csv parser to create stream to prevent race conditions
+            const stream = fs.createReadStream(normalizedPath).pipe(csvParser());
+
+            const flushBatch = async () => {
+                if (batch.length === 0) return;
+
+                const validDocs = [];
+                const validMeta = [];
+
+                // for each batch, perform validation on every rows
+                for (const item of batch) {
+                    if (item.errors.length > 0) {
+                        importJob.failedCount++;
+                        importJob.rejectedRecords.push({
+                            row: item.rowNumber,
+                            data: item.rawRow,
+                            errors: item.errors,
+                        });
+                    } else {
+                        validDocs.push(item.parsedRow);
+                        validMeta.push(item);
+                    }
+                }
+                
+                // insert valid documents into the database in batch
+                if (validDocs.length > 0) {
+                    try {
+                        await Customer.insertMany(validDocs, { ordered: false });
+                        importJob.successCount += validDocs.length;
+                    } catch (dbErr) {
+                        // Handle database insertion errors, including duplicate key errors
+                        if (Array.isArray(dbErr.writeErrors)) {
+                            // collect indexes of failed inserts
+                            const failedIndexes = new Set(
+                                dbErr.writeErrors.map((writeErr) => writeErr.index)
+                            );
+                            const insertedCount = validDocs.length - failedIndexes.size;
+                            importJob.successCount += insertedCount;
+
+                            for (const writeErr of dbErr.writeErrors) {
+                                const meta = validMeta[writeErr.index];
+                                if (!meta) continue;
+                                importJob.failedCount++;
+                                importJob.rejectedRecords.push({
+                                    row: meta.rowNumber,
+                                    data: meta.rawRow,
+                                    errors: [writeErr.errmsg || writeErr.message || dbErr.message],
+                                });
+                            }
+                        }
+                        // All rows in batch failed 
+                        else {
+                            for (const meta of validMeta) {
+                                importJob.failedCount++;
+                                importJob.rejectedRecords.push({
+                                    row: meta.rowNumber,
+                                    data: meta.rawRow,
+                                    errors: [dbErr.message],
+                                });
+                            }
+                        }
+                    }
+                }
+
+                batch = [];
+            };
+
+            for await (const row of stream) {
                 importJob.totalRecords++;
-
 
                 /*
                 validation rules:
@@ -48,55 +123,38 @@ const worker = new Worker(
                 // validate the row data and collect any errors
                 const { isValid, errors, parsedRow } = validateCustomerRow(row);
 
-    
-                if (!isValid) {
-                    importJob.failedCount++;
-                    importJob.rejectedRecords.push({
-                        row: rowNumber,
-                        data: row,
-                        errors,
-                    });
-                } else {
-                    try{
-                        // if no errors, save the customer data
-                        const customer = new Customer(
-                            parsedRow
-                        );
-                        await customer.save();
-                        importJob.successCount++;
-                    }catch(dberr){
-                        // catch db error and store in error
-                        importJob.failedCount++;
-                        importJob.rejectedRecords.push({
-                            row: rowNumber,
-                            data: row,
-                            errors: [dberr.message],
-                        });
-                    }
-                }
-                rowNumber++;
-            });
-
-            stream.on("end", async () => {
-                // update import job status and counts
-                importJob.status = "completed";
-                await importJob.save();
-                resolve(importJob);
-            });
-
-            stream.on("error", async (err) => {
-                // update import job status to failed
-                importJob.status = "failed";
-                importJob.failedCount++;
-                importJob.rejectedRecords.push({
-                    row: rowNumber,
-                    data: {},
-                    errors: [err.message],
+                batch.push({
+                    rowNumber,
+                    rawRow: row,
+                    errors: isValid ? [] : errors,
+                    parsedRow: isValid ? parsedRow : null,
                 });
-                importJob.save();
-                reject(err);
+
+                if (batch.length >= BATCH_SIZE) {
+                    await flushBatch();
+                }
+
+                rowNumber++;
+            }
+
+            await flushBatch();
+
+            // update import job status and counts
+            importJob.status = "completed";
+            await importJob.save();
+            return importJob;
+        } catch (err) {
+            // update import job status to failed
+            importJob.status = "failed";
+            importJob.failedCount++;
+            importJob.rejectedRecords.push({
+                row: rowNumber,
+                data: {},
+                errors: [err.message],
             });
-        });
+            await importJob.save();
+            throw err;
+        }
     }, { connection: redisConnection }
 );
 
@@ -108,3 +166,4 @@ worker.on("failed", (job, error) => {
   console.error("Worker failed:", error);
 });
 
+ 

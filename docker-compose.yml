@@ -9,6 +9,21 @@ services:
       - MONGO_URI=mongodb://mongo:27017/async_csv
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+    volumes:
+      - ./uploads:/app/uploads
+    depends_on:
+      - mongo
+      - redis
+
+  worker:
+    build: .
+    command: npm run worker
+    environment:
+      - MONGO_URI=mongodb://mongo:27017/async_csv
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    volumes:
+      - ./uploads:/app/uploads
     depends_on:
       - mongo
       - redis
