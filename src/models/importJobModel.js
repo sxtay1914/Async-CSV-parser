@@ -5,7 +5,7 @@ const rejectedSchema = new mongoose.Schema({
     row: Number,
     data: Object,
     errors: [String],
-})
+}, { suppressReservedKeysWarning: true })
 
 // import job schema
 const importJobSchema = new mongoose.Schema({

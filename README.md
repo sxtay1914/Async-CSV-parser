@@ -69,14 +69,8 @@ Unit tests:
 Integration tests (requires Docker services running):
 
 ```bash
-docker-compose up -d mongo redis worker
+docker-compose up 
 npm run test:integration
-```
-
-Coverage:
-
-```bash
-npm test -- --coverage
 ```
 
 ## Project Structure
