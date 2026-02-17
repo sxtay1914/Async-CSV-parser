@@ -94,12 +94,12 @@ npm test -- --coverage
 ## Architecture
 
 ```
-Client
-  |
-  | POST /api/import (multipart CSV)
-  v
-Express API
-  |
+- - Client
+- -   |
+- -   | POST /api/import (multipart CSV)
+- -   v
+- - Express API
+- -   |
 - -   -- Customer CRUD -> MongoDB (synchronous)
 - -   |
 - -   -- CSV Upload
@@ -112,6 +112,8 @@ Express API
 - -         |
 - -         v
 - -   Stream CSV -> Validate -> Batch Insert -> Update Job Stat
+
+
 - +   | Save file to disk
 - +   | Create ImportJob document (MongoDB)
 - +   | Enqueue job in Redis (BullMQ)
@@ -153,7 +155,6 @@ When a user uploads a CSV file, the API enqueues an import job and returns immed
 ## Future Improvements
 
 - Add OpenAPI/Swagger docs generated from route definitions.
-- Add streaming backpressure and batch inserts for faster imports.
 - Add auth and request rate limiting.
 - Add structured logging and metrics.
 - Add retry and dead-letter handling for failed jobs.
