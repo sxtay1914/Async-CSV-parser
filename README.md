@@ -96,41 +96,41 @@ npm test -- --coverage
 ```
 Client
   |
-+   | POST /api/import (multipart CSV)
+  | POST /api/import (multipart CSV)
   v
 Express API
   |
--   +-- Customer CRUD -> MongoDB (synchronous)
--   |
--   +-- CSV Upload
--         |
--         v
--       BullMQ Queue (Redis)
--         |
--         v
--     Worker Process
--         |
--         v
--   Stream CSV -> Validate -> Batch Insert -> Update Job Stat
-+   | Save file to disk
-+   | Create ImportJob document (MongoDB)
-+   | Enqueue job in Redis (BullMQ)
-+   v
-+ Redis Job Queue
-+   |
-+   v
-+ Worker Process
-+   |
-+   | Stream CSV file (row-by-row)
-+   | Validate each row
-+   | Buffer valid rows into batches (size N)
-+   | Bulk insert using insertMany()
-+   | Track rejected records
-+   | Update ImportJob status
-+   v
-+ MongoDB
-+   |-- Customers Collection
-+   `-- ImportJobs Collection
+- -   -- Customer CRUD -> MongoDB (synchronous)
+- -   |
+- -   -- CSV Upload
+- -         |
+- -         v
+- -       BullMQ Queue (Redis)
+- -         |
+- -         v
+- -     Worker Process
+- -         |
+- -         v
+- -   Stream CSV -> Validate -> Batch Insert -> Update Job Stat
+- +   | Save file to disk
+- +   | Create ImportJob document (MongoDB)
+- +   | Enqueue job in Redis (BullMQ)
+- +   v
+- + Redis Job Queue
+- +   |
+- +   v
+- + Worker Process
+- +   |
+- +   | Stream CSV file (row-by-row)
+- +   | Validate each row
+- +   | Buffer valid rows into batches (size N)
+- +   | Bulk insert using insertMany()
+- +   | Track rejected records
+- +   | Update ImportJob status
+- +   v
+- + MongoDB
+- +   |-- Customers Collection
+- +   `-- ImportJobs Collection
 ```
 
 ## Design Decisions
